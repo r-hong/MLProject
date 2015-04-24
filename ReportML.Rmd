@@ -1,0 +1,159 @@
+---
+title: 'Practical MachineLearning: Final Project '
+author: "Rolando P. Hong Enriquez"
+date: "Thursday, April 23, 2015"
+output: html_document
+---
+###Introduction
+In this report an estrategy to implement several machine learning (ML) techniques is applied to solve a classification problem in a data base containing measures (mostly from accelerometers located in several parts of the body) aimed to monitor the quality of human physical activities. Detailed information the data sets used in this report can be obtained directly from the website <http://groupware.les.inf.puc-rio.br/har>. The corresponding references from the authors is:
+
+<sub><sup>Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6.</sub></sup>
+
+Specifically, in this report using ML technoques we will try to predict the way in which the human activities (exercices) were performed. This information in the training sets will be saved in the variable "classe", which will therefore be the response variable in the study. 
+
+## Getting and preprocessing data.
+
+The original training set (containing the variable "classe") and test set (containing the 20 test set cases to be delivered) were downloaded from:
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+
+and they were loaded into R homogenizing at the same type the 'NA' values:
+
+```{r, cache=TRUE}
+training<-read.csv("pml-training.csv",na.strings=c("NA","#DIV/0!",""))
+testing<-read.csv("pml-testing.csv",na.strings=c("NA","#DIV/0!",""))
+```
+
+As we can see, the original training set has 160 features and 19622 training examples:
+```{r}
+dim(training)
+```
+
+Next we explore the training data set to see how many 'NA' values are present on each feature:
+
+```{r}
+tmp<-dim(training)
+d=tmp[2]
+colNA<-0
+for (i in 1:d){
+        s<-sum(is.na(training[,i]))
+        colNA<-c(colNA,s)
+}
+colNA<-colNA[2:length(colNA)]
+barplot(colNA,xlab="Features",ylab="Number of NA values")
+```
+
+From this bar plot we calsee that there are many features with a large number of 'NA' values, therefore an initial preprocesing step would be to just get rid of these features as they will not have a positive impact on a prediction. We also eliminate the first 7 features which are uninformative for prediction.
+
+```{r,cache=TRUE}
+myfeatures<-NULL
+nm<-names(training)
+for (i in 1:d){
+        if (colNA[i]==0){
+                myfeatures<-c(myfeatures,i)
+        }
+}
+train<-training[myfeatures]
+test<-testing[myfeatures]
+train<-train[8:length(myfeatures)]
+test<-test[8:length(myfeatures)]
+dim(train)
+```
+
+As we see, the new (cleaned) training set named 'train' has only 53 features. (a total of 107 features were eliminated).
+
+## Creating the model
+
+Before creating the model we first load all the libraries that will be needed and set the seed to ensure the reproducibility on the results by other analysts.
+
+```{r,cache=TRUE, tidy=TRUE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+set.seed(1000)
+```
+
+
+A first step in creating the model is the partitioning of the data:
+
+```{r,cache=TRUE}
+inTraining <- createDataPartition(train$classe, p = .75, list = FALSE)
+TRN <- train[ inTraining,]
+TST <- train[-inTraining,]
+dim(TRN)
+```
+
+# Classification Tree
+
+Next we define some fine tunning to be used in the model. Specifically we substitute the default cross validation by a k-fold cross validation with K=10 (as we saw the training data set to be finaly used, 'TRN', still has more than 14000 values which justifies our choice of k). Subsequently wefir a model using as method a classification tree ('rpart').  
+.
+```{r,cache=TRUE}
+fitControl <- trainControl(method = "repeatedcv",number = 10,repeats = 10)
+modelTree<-train(classe ~ .,data=TRN,method="rpart",trControl=fitControl)
+modelTree
+```
+
+As we see, with this strategy we obtained a trained model with a not very good accuracy (0.49). A visualization of the final model can be obsserved in the next figure:
+
+```{r,cache=TRUE}
+fancyRpartPlot(modelTree$finalModel)
+```
+
+We can also see the performace of this classification tree model on new test data. It is worth noting tha the use of extensive k-fold cross validation estrategy in the training set allowed us to avoid overfitting, indeed the out of the sample (generalization) error in this new data is remarkably good. 
+
+
+```{r}
+library(caret)
+modelTree.prediction<-predict(modelTree,TST)
+confusionMatrix(modelTree.prediction,TST$classe)
+```
+
+# Random Forest
+
+Still, with this poor results we made a change to a more powerful approach: random forest.
+
+```{r}
+library(randomForest)
+modelRF<-randomForest(classe ~ ., TRN,ntree=20,norm.votes=FALSE)
+modelRF
+```
+
+A plot of the training error rates for the generated random forest shows that a forest with 20 trees is good enough as the errors are minimized.
+
+```{r,fig.cap="The errors per each class and their average get minimized for a forest of approximately 20 trees."}
+plot(modelRF,main="MSE (error rates) of the Random Forest")
+```
+
+In fact the predictions with the random forest have a very high quality:
+
+```{r}
+library(caret)
+modelRF.prediction<-predict(modelRF,TST)
+confusionMatrix(modelRF.prediction,TST$classe)
+```
+
+## Final Evaluation
+
+Now we use the random forest model to make the 20 prediction to be submitted in this exercice. First we can reformat the final test set to have the same structure as the training set used to build the models.
+
+```{r}
+colnames(test)[53]<-"classe"
+test$classe[1]<-"A"
+test$classe[2]<-"B"
+test$classe[3]<-"C"
+test$classe[4]<-"D"
+test$classe[5]<-"E"
+test$classe[6:20]<-"A"
+test[,"classe"]<-as.factor(test[,"classe"])
+```
+
+and we finaly made the predictions:
+
+```{r}
+predT<-predict(modelRF,test)
+predT
+```
